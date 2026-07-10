@@ -224,6 +224,20 @@ To enable automatic eviction after each cache write, set in `.env`:
 EVICTION_ENABLED=true
 ```
 
+## Hashed Fallback Migration
+
+Pre-generated files in the local fallback directory (`TTSPrompt/`) must be named after their `xxh3_128` cache key hashes (e.g. `{cache_key}.wav`). 
+
+If you have human-readable files (named like `english_dipti_am_i_speaking_with___a._abdul_rahaman.wav`), you can migrate them to the hashed layout using the provided script:
+
+```bash
+# Run a dry-run migration to inspect changes
+uv run python -m scripts.hash_prompts --dir ./TTSPrompt --dry-run
+
+# Run the migration for real (renames files in-place)
+uv run python -m scripts.hash_prompts --dir ./TTSPrompt
+```
+
 ## Switching to a Real TTS API
 
 When you have access to the actual TTS service:

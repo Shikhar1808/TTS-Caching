@@ -122,7 +122,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize pre-generated file lookup
     _pre_generated = PreGeneratedLookup(settings.pre_generated_dir)
-    logger.info("Pre-generated lookup: %d files indexed", _pre_generated.size)
 
     # Ensure cache directory exists
     os.makedirs(settings.cache_dir, exist_ok=True)

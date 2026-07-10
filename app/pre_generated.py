@@ -1,20 +1,13 @@
 """
 Pre-generated audio file lookup for the TTS Caching Server.
 
-Parses filenames in the pre-generated directory (e.g. TTSPrompt/) into
-(language, voice, text) tuples, builds an in-memory index keyed by cache
-key, and provides a fast lookup to serve audio without calling the external
-TTS API.
+Directly checks the pre-generated directory (e.g. TTSPrompt/) for audio files
+named after their cache key hashes (e.g. {cache_key}.{ext}). This provides
+a fast O(1) lookup without requiring startup directory scanning or in-memory
+indexing.
 
-Filename convention expected:
-    {language}_{voice}_{prompt_text}___{dynamic_variable}.{ext}
-    OR
-    {language}_{voice}_{full_text}.{ext}
-
-Examples:
-    english_dipti_am_i_speaking_with___a._abdul_rahaman.wav
-    english_dipti_am_i_speaking_with___pallavi.wav
-    english_dipti_am_i_speaking_with___.wav  (no variable — just the template)
+Legacy filename parsing functions (e.g. _parse_filename) are retained in this
+module to support migration/renaming scripts (like scripts/hash_prompts.py).
 """
 
 import logging
@@ -100,18 +93,16 @@ def _parse_filename(filename: str) -> Optional[tuple[str, str, str, str]]:
 
 
 class PreGeneratedLookup:
-    """In-memory index of pre-generated TTS audio files.
+    """Pre-generated TTS audio file lookup using hashed filenames.
 
-    On initialization, scans the configured directory, parses each filename,
-    computes the cache key using the same formula as CacheManager, and stores
-    a mapping from cache_key → file path.
+    Checks the configured directory directly for a file matching the request's
+    calculated cache key (e.g. `{directory}/{cache_key}.{format}`).
 
-    This allows the /tts endpoint to serve pre-generated audio with zero
-    external API calls.
+    This avoids indexing overhead on startup and runs in O(1) time.
     """
 
     def __init__(self, directory: str | None = None) -> None:
-        """Initialize and build the lookup index.
+        """Initialize PreGeneratedLookup.
 
         Args:
             directory: Path to the pre-generated audio directory.
@@ -121,82 +112,11 @@ class PreGeneratedLookup:
             directory = get_settings().pre_generated_dir
 
         self._directory = Path(directory)
-        # Maps cache_key → absolute file path
-        self._index: dict[str, Path] = {}
-        # Maps cache_key → (language, voice, text, format) for metadata
-        self._metadata: dict[str, tuple[str, str, str, str]] = {}
-
-        self._build_index()
-
-    @property
-    def size(self) -> int:
-        """Number of indexed pre-generated files."""
-        return len(self._index)
-
-    def _build_index(self) -> None:
-        """Scan the directory and index all parseable audio files."""
-        if not self._directory.exists():
-            logger.warning(
-                "Pre-generated directory does not exist: %s",
-                self._directory,
-            )
-            return
-
-        if not self._directory.is_dir():
-            logger.warning(
-                "Pre-generated path is not a directory: %s",
-                self._directory,
-            )
-            return
-
-        # Import here to avoid circular imports
-        from .cache import CacheManager
-
-        indexed = 0
-        skipped = 0
-
-        for entry in os.scandir(self._directory):
-            if not entry.is_file():
-                continue
-
-            parsed = _parse_filename(entry.name)
-            if parsed is None:
-                skipped += 1
-                continue
-
-            language, voice, text, fmt = parsed
-
-            # Build a TTSRequest to compute the cache key
-            # (uses the same hash formula as the main cache)
-            try:
-                request = TTSRequest(
-                    text=text,
-                    voice=voice,
-                    language=language,
-                    format=fmt,
-                )
-            except Exception:
-                skipped += 1
-                continue
-
-            cache_key = CacheManager.compute_key(request)
-            file_path = Path(entry.path).resolve()
-
-            self._index[cache_key] = file_path
-            self._metadata[cache_key] = (language, voice, text, fmt)
-            indexed += 1
-
-        logger.info(
-            "Pre-generated index built: %d files indexed, %d skipped (dir: %s)",
-            indexed,
-            skipped,
-            self._directory,
-        )
 
     def lookup(self, request: TTSRequest) -> Optional[Path]:
         """Check if a pre-generated file exists for this TTS request.
 
-        Computes the cache key and checks the in-memory index.
+        Computes the cache key and checks if the hashed file exists.
 
         Args:
             request: The TTS request to look up.
@@ -207,48 +127,15 @@ class PreGeneratedLookup:
         from .cache import CacheManager
 
         cache_key = CacheManager.compute_key(request)
-        path = self._index.get(cache_key)
+        file_path = self._directory / f"{cache_key}.{request.format}"
 
-        if path is not None:
-            # Verify the file still exists on disk
-            if path.exists():
-                logger.debug(
-                    "Pre-generated HIT: %s → %s",
-                    cache_key,
-                    path.name,
-                )
-                return path
-            else:
-                logger.warning(
-                    "Pre-generated file missing from disk: %s (was: %s)",
-                    cache_key,
-                    path,
-                )
-                # Remove stale entry
-                del self._index[cache_key]
-                del self._metadata[cache_key]
+        if file_path.exists() and file_path.is_file():
+            logger.debug(
+                "Pre-generated HIT (hashed): %s → %s",
+                cache_key,
+                file_path.name,
+            )
+            return file_path
 
         return None
-
-    def get_metadata(self, cache_key: str) -> Optional[tuple[str, str, str, str]]:
-        """Get the parsed metadata for a pre-generated cache key.
-
-        Args:
-            cache_key: The hex hash to look up.
-
-        Returns:
-            Tuple of (language, voice, text, format) if found, None otherwise.
-        """
-        return self._metadata.get(cache_key)
-
-    def get_all_entries(self) -> list[tuple[str, Path, tuple[str, str, str, str]]]:
-        """Get all indexed entries for diagnostics.
-
-        Returns:
-            List of (cache_key, path, (language, voice, text, format)) tuples.
-        """
-        return [
-            (key, self._index[key], self._metadata[key])
-            for key in self._index
-        ]
 """Module initialization complete."""

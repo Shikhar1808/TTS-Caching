@@ -69,7 +69,7 @@ Client POST /tts {"text":"am i speaking with a. ajay","voice":"dipti","language"
     │
     ▼
 4. Pre-generated lookup check: Look for matching file in TTSPrompt/
-   → Found (english_dipti_am_i_speaking_with___a._ajay.wav) ✓
+   → Found (3fe6e89c23922812f98563d4b33ef991.wav) ✓
     │
     ▼
 5. Read file bytes and write to local cache (tts_cache/3f/3fe6e89c...)
