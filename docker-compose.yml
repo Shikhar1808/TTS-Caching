@@ -1,0 +1,38 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: tts-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tts-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./tts_cache:/app/tts_cache
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_DIR=/app/tts_cache
+      - EVICTION_ENABLED=false
+      - DEMO_MODE_ENABLED=true
+      - TTS_API_BASE_URL=http://app:8000/demo
+      - LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:

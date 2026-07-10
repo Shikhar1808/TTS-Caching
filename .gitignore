@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Environment files
+.env
+
+# Cache directories
+tts_cache/
+.pytest_cache/
+
+# Benchmark results
+benchmark_results.json
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
