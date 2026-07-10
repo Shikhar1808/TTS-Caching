@@ -1,6 +1,6 @@
 # TTS Caching Server
 
-A production-grade FastAPI server that accepts text input, generates speech audio via an external TTS API, and caches the result on local disk using content-addressable storage (xxh3_128 hashing). Identical requests never hit the external API twice — cache lookups are backed by Redis metadata with distributed locking for safe concurrent access.
+A production-grade FastAPI server that accepts text input, generates speech audio via an external TTS API, and caches the result on local disk using content-addressable storage (xxh3_128 hashing). Identical requests never hit the external API twice. The server includes a **local fallback layer** that serves pre-generated files (e.g., from `TTSPrompt/`) directly at zero API cost. Cache lookups are backed by Redis metadata with distributed locking for safe concurrent access.
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ cd "TTS Server"
 cp .env.example .env
 ```
 
-Default settings work out-of-the-box for local development with the built-in demo TTS endpoint. Edit `.env` to customize.
+Default settings work out-of-the-box for local development with the built-in demo TTS endpoint and pre-generated audio fallback. Edit `.env` to customize.
 
 ### 3. Start Redis (Docker)
 
@@ -55,7 +55,9 @@ The server starts at `http://localhost:8000`. You'll see:
 INFO | Starting TTS Caching Server...
 INFO | Cache directory: ./tts_cache
 INFO | Demo mode: True
+INFO | Pre-generated dir: ./TTSPrompt
 INFO | Redis connection established
+INFO | Pre-generated lookup: 8628 files indexed
 INFO | TTS Caching Server started successfully
 ```
 
@@ -91,6 +93,7 @@ docker compose down
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CACHE_DIR` | `./tts_cache` | Root directory for cached audio files |
+| `PRE_GENERATED_DIR` | `./TTSPrompt` | Directory containing pre-generated audio files for local fallback |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `MAX_CACHE_SIZE_GB` | `10.0` | Max cache size before eviction |
 | `EVICTION_ENABLED` | `false` | Toggle automatic LRU eviction |
@@ -110,7 +113,7 @@ docker compose down
 ```bash
 curl -X POST http://localhost:8000/tts \
   -H "Content-Type: application/json" \
-  -d '{"text": "Hello, welcome to our service.", "voice": "default", "language": "en"}' \
+  -d '{"text": "am i speaking with a. ajay", "voice": "dipti", "language": "english"}' \
   --output hello.wav
 ```
 
@@ -118,18 +121,22 @@ curl -X POST http://localhost:8000/tts \
 
 ```json
 {
-  "text": "Hello, welcome to our service.",
-  "voice": "default",
-  "language": "en",
+  "text": "am i speaking with a. ajay",
+  "voice": "dipti",
+  "language": "english",
   "format": "wav"
 }
 ```
 
+*Note: The `language` parameter automatically normalizes full names (like `"english"`) to ISO codes (like `"en"`) internally.*
+
 **Response:** Binary audio file with headers:
 - `Content-Type: audio/wav`
-- `X-Cache-Status: HIT` or `MISS`
+- `X-Cache-Status: HIT`, `PRE_GENERATED`, or `MISS`
 
-First request → `MISS` (generates + caches), second identical request → `HIT` (served from disk).
+- `HIT`: Served from the local redis/disk cache.
+- `PRE_GENERATED`: Match found in `PRE_GENERATED_DIR` local fallback, served directly (and written to cache for subsequent requests).
+- `MISS`: Generated via external TTS API call.
 
 ### GET /health — Health check
 
@@ -243,9 +250,11 @@ TTS Server/
 │   ├── tts_client.py # Async TTS API client with retry
 │   ├── config.py     # Pydantic Settings
 │   ├── models.py     # Request/response models
+│   ├── pre_generated.py # Pre-generated local fallback index
 │   └── eviction.py   # LRU eviction (optional)
 ├── scripts/          # Standalone client / benchmark tools
 │   └── benchmark.py  # Benchmark client (optional)
+├── TTSPrompt/        # Pre-generated WAV audio files for local fallback
 ├── pyproject.toml    # uv project dependencies
 ├── .env.example      # Environment template
 ├── README.md         # This file

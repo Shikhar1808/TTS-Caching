@@ -24,28 +24,59 @@ locking, and LRU eviction.
 ### Cache HIT Path (fast — no external API call)
 
 ```
-Client POST /tts {"text":"Hello world","voice":"default","language":"en"}
+Client POST /tts {"text":"Hello world","voice":"default","language":"english"}
     │
     ▼
-1. Compute cache_key = xxh3_128("en_default_Hello world" + "wav").hexdigest()
+1. Normalize language: "english" → "en"
+    │
+    ▼
+2. Compute cache_key = xxh3_128("en_default_Hello world" + "wav").hexdigest()
    → e.g. "a3f7b2c1e9d04856a1b2c3d4e5f60718"
     │
     ▼
-2. Redis GET tts:meta:a3f7b2c1e9d04856a1b2c3d4e5f60718
+3. Redis GET tts:meta:a3f7b2c1e9d04856a1b2c3d4e5f60718
    → Found! Metadata JSON returned
     │
     ▼
-3. Verify file exists: tts_cache/a3/a3f7b2c1e9d04856a1b2c3d4e5f60718.wav
+4. Verify file exists: tts_cache/a3/a3f7b2c1e9d04856a1b2c3d4e5f60718.wav
    → Exists ✓
     │
     ▼
-4. Redis INCR tts:stats:hits
+5. Redis INCR tts:stats:hits
     │
     ▼
-5. Stream FileResponse with X-Cache-Status: HIT
+6. Stream FileResponse with X-Cache-Status: HIT
     │
     ▼
-6. (Fire-and-forget) Update last_accessed in Redis metadata
+7. (Fire-and-forget) Update last_accessed in Redis metadata
+```
+
+### Pre-Generated HIT Path (local fallback — no external API call)
+
+```
+Client POST /tts {"text":"am i speaking with a. ajay","voice":"dipti","language":"english"}
+    │
+    ▼
+1. Normalize language: "english" → "en"
+    │
+    ▼
+2. Compute cache_key = xxh3_128("en_dipti_am i speaking with a. ajay" + "wav").hexdigest()
+   → e.g. "3fe6e89c23922812f98563d4b33ef991"
+    │
+    ▼
+3. Redis GET tts:meta:3fe6e89c...
+   → Not found (MISS in Redis)
+    │
+    ▼
+4. Pre-generated lookup check: Look for matching file in TTSPrompt/
+   → Found (english_dipti_am_i_speaking_with___a._ajay.wav) ✓
+    │
+    ▼
+5. Read file bytes and write to local cache (tts_cache/3f/3fe6e89c...)
+   and store metadata in Redis (for subsequent fast hits)
+    │
+    ▼
+6. Stream FileResponse with X-Cache-Status: PRE_GENERATED
 ```
 
 ### Cache MISS Path (slow — calls external TTS API)
@@ -62,37 +93,41 @@ Client POST /tts {"text":"New sentence","voice":"default","language":"en"}
    → Not found (MISS)
     │
     ▼
-3. Acquire lock: SET lock:b1e2f3a4c5d60718fedcba9876543210 <uuid> NX PX 30000
+3. Pre-generated lookup check: Look for matching file in TTSPrompt/
+   → Not found
+    │
+    ▼
+4. Acquire lock: SET lock:b1e2f3a4c5d60718fedcba9876543210 <uuid> NX PX 30000
    → Acquired ✓
     │
     ▼
-4. Double-check: Redis GET tts:meta:b1e2...  (race condition guard)
+5. Double-check: Redis GET tts:meta:b1e2...  (race condition guard)
    → Still not found
     │
     ▼
-5. Call external TTS API: POST {base_url}/synthesize
+6. Call external TTS API: POST {base_url}/synthesize
    with retry + exponential backoff (tenacity)
    → Returns audio bytes
     │
     ▼
-6. Write temp file:   tts_cache/b1/b1e2f3a4c5d60718fedcba9876543210.wav.tmp
+7. Write temp file:   tts_cache/b1/b1e2f3a4c5d60718fedcba9876543210.wav.tmp
     │
     ▼
-7. Atomic rename:     tts_cache/b1/b1e2f3a4c5d60718fedcba9876543210.wav
+8. Atomic rename:     tts_cache/b1/b1e2f3a4c5d60718fedcba9876543210.wav
     │
     ▼
-8. Store metadata in Redis: SET tts:meta:b1e2f3a4c5d60718fedcba9876543210 <JSON>
+9. Store metadata in Redis: SET tts:meta:b1e2f3a4c5d60718fedcba9876543210 <JSON>
    Redis INCR tts:stats:misses
     │
     ▼
-9. Release lock: DEL lock:b1e2f3a4c5d60718fedcba9876543210
-   (only if lock value matches — Lua script)
+10. Release lock: DEL lock:b1e2f3a4c5d60718fedcba9876543210
+    (only if lock value matches — Lua script)
     │
     ▼
-10. Stream FileResponse with X-Cache-Status: MISS
+11. Stream FileResponse with X-Cache-Status: MISS
     │
     ▼
-11. (Optional) Background task: check eviction threshold
+12. (Optional) Background task: check eviction threshold
 ```
 
 ---
@@ -387,18 +422,24 @@ docker exec -it tts-redis redis-cli ping
 ### Inspect a specific cache key's metadata
 
 ```bash
-# 1. Compute the cache key by hand
+# 1. Compute the cache key by hand (with language normalization)
 python -c "
 import xxhash
-text = 'Hello, welcome to our service.'
-voice = 'default'
-language = 'en'
+text = 'am i speaking with a. ajay'
+voice = 'dipti'
+language = 'english'
 fmt = 'wav'
-input_str = f'{language}_{voice}_{text}'
+
+# Normalize language
+aliases = {'english': 'en', 'hindi': 'hi', 'tamil': 'ta', 'telugu': 'te'}
+normalized_lang = aliases.get(language.strip().lower(), language.strip().lower())
+
+input_str = f'{normalized_lang}_{voice}_{text}'
 key = xxhash.xxh3_128((input_str + fmt).encode()).hexdigest()
-print(f'cache_key: {key}')
-print(f'shard:     {key[:2]}')
-print(f'redis_key: tts:meta:{key}')
+print(f'normalized_lang: {normalized_lang}')
+print(f'cache_key:       {key}')
+print(f'shard:           {key[:2]}')
+print(f'redis_key:       tts:meta:{key}')
 "
 
 # 2. Check Redis for the metadata

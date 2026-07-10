@@ -7,7 +7,7 @@ Provides three core endpoints:
 - GET  /cache/stats — Cache hit/miss statistics
 
 And one optional demo endpoint (when demo_mode_enabled=True):
-- POST /demo/synthesize — Generates random WAV audio for testing
+- POST /demo/synthesize — Serves real pre-generated audio or random WAV for testing
 """
 
 import asyncio
@@ -30,6 +30,7 @@ from .cache import CacheManager
 from .config import get_settings
 from .eviction import run_eviction
 from .models import CacheStatsResponse, HealthResponse, TTSRequest
+from .pre_generated import PreGeneratedLookup
 from .tts_client import TTSClient, TTSGenerationError
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ _redis_client: aioredis.Redis | None = None
 _cache_manager: CacheManager | None = None
 _tts_client: TTSClient | None = None
 _http_client: httpx.AsyncClient | None = None
+_pre_generated: PreGeneratedLookup | None = None
 
 
 def _get_cache_manager() -> CacheManager:
@@ -56,6 +58,11 @@ def _get_tts_client() -> TTSClient:
     if _tts_client is None:
         raise RuntimeError("TTSClient not initialized")
     return _tts_client
+
+
+def _get_pre_generated() -> PreGeneratedLookup | None:
+    """Get the PreGeneratedLookup instance (may be None if disabled)."""
+    return _pre_generated
 
 
 # ------------------------------------------------------------------ #
@@ -77,7 +84,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     - Close httpx client
     - Close Redis connection
     """
-    global _redis_client, _cache_manager, _tts_client, _http_client
+    global _redis_client, _cache_manager, _tts_client, _http_client, _pre_generated
 
     settings = get_settings()
 
@@ -93,6 +100,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Redis URL: %s", settings.redis_url)
     logger.info("Demo mode: %s", settings.demo_mode_enabled)
     logger.info("Eviction enabled: %s", settings.eviction_enabled)
+    logger.info("Pre-generated dir: %s", os.path.abspath(settings.pre_generated_dir))
 
     # Connect to Redis
     _redis_client = aioredis.from_url(
@@ -111,6 +119,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Create HTTP client and TTS client
     _http_client = httpx.AsyncClient()
     _tts_client = TTSClient(_http_client)
+
+    # Initialize pre-generated file lookup
+    _pre_generated = PreGeneratedLookup(settings.pre_generated_dir)
+    logger.info("Pre-generated lookup: %d files indexed", _pre_generated.size)
 
     # Ensure cache directory exists
     os.makedirs(settings.cache_dir, exist_ok=True)
@@ -163,6 +175,7 @@ async def synthesize_speech(request: TTSRequest) -> FileResponse:
     """
     cache_manager = _get_cache_manager()
     tts_client = _get_tts_client()
+    pre_generated = _get_pre_generated()
     settings = get_settings()
 
     # Step 1: Compute cache key
@@ -187,6 +200,45 @@ async def synthesize_speech(request: TTSRequest) -> FileResponse:
             media_type=_get_media_type(request.format),
             filename=f"{cache_key}.{request.format}",
             headers={"X-Cache-Status": "HIT"},
+        )
+
+    # Step 3.5: Check pre-generated files (local fallback)
+    pre_gen_path = pre_generated.lookup(request) if pre_generated else None
+    if pre_gen_path is not None:
+        logger.info(
+            "Pre-generated HIT: %s → %s (skipping external API)",
+            cache_key,
+            pre_gen_path.name,
+        )
+
+        # Read the file and write it into the main cache for future fast hits
+        try:
+            audio_data = pre_gen_path.read_bytes()
+            metadata = await cache_manager.put(cache_key, audio_data, request)
+            logger.info(
+                "Pre-generated file cached: %s (%d bytes)",
+                cache_key,
+                len(audio_data),
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to cache pre-generated file %s: %s (serving directly)",
+                cache_key,
+                e,
+            )
+            # Serve directly from pre-generated directory even if caching failed
+            return FileResponse(
+                path=str(pre_gen_path),
+                media_type=_get_media_type(request.format),
+                filename=f"{cache_key}.{request.format}",
+                headers={"X-Cache-Status": "PRE_GENERATED"},
+            )
+
+        return FileResponse(
+            path=metadata.path,
+            media_type=_get_media_type(request.format),
+            filename=f"{cache_key}.{request.format}",
+            headers={"X-Cache-Status": "PRE_GENERATED"},
         )
 
     # Step 4: CACHE MISS — acquire distributed lock
@@ -315,10 +367,13 @@ async def cache_stats() -> CacheStatsResponse:
 
 @app.post("/demo/synthesize", response_model=None)
 async def demo_synthesize(request: Request):
-    """Generate random WAV audio for testing (demo mode only).
+    """Generate or serve TTS audio for testing (demo mode only).
 
-    Produces a valid WAV file with ~1 second of random noise at 22050 Hz,
-    16-bit PCM. Adds artificial latency to simulate a real TTS API.
+    First checks the pre-generated files directory for a matching audio file.
+    If found, serves the real audio. Otherwise, produces a valid WAV file
+    with ~1 second of random noise at 22050 Hz, 16-bit PCM.
+
+    Adds artificial latency to simulate a real TTS API.
 
     This endpoint is only available when demo_mode_enabled=True.
 
@@ -334,12 +389,39 @@ async def demo_synthesize(request: Request):
 
     body = await request.json()
     text = body.get("text", "")
+    voice = body.get("voice", "default")
+    language = body.get("language", "en")
+    fmt = body.get("format", "wav")
 
     # Artificial latency to simulate real API (300ms – 1000ms)
     delay = random.uniform(0.3, 1.0)
     await asyncio.sleep(delay)
 
-    # Generate random WAV audio (~1 second, 22050 Hz, 16-bit mono PCM)
+    # Try to serve from pre-generated files first
+    pre_generated = _get_pre_generated()
+    if pre_generated is not None:
+        try:
+            tts_request = TTSRequest(
+                text=text, voice=voice, language=language, format=fmt
+            )
+            pre_gen_path = pre_generated.lookup(tts_request)
+            if pre_gen_path is not None:
+                logger.debug(
+                    "Demo: serving pre-generated audio (delay=%.2fs, text='%s...')",
+                    delay,
+                    text[:50],
+                )
+                from fastapi.responses import Response
+
+                audio_bytes = pre_gen_path.read_bytes()
+                return Response(
+                    content=audio_bytes,
+                    media_type=_get_media_type(fmt),
+                )
+        except Exception:
+            pass  # Fall through to random noise generation
+
+    # Fallback: Generate random WAV audio (~1 second, 22050 Hz, 16-bit mono PCM)
     sample_rate = 22050
     duration_seconds = 1.0
     num_samples = int(sample_rate * duration_seconds)

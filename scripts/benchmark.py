@@ -24,19 +24,24 @@ from datetime import datetime, timezone
 
 import httpx
 
-# Default test sentences: 10 unique, each repeated once = 20 requests
+# Default test sentences derived from real TTSPrompt file patterns.
+# These match the "am i speaking with {name}" template used in production.
 DEFAULT_SENTENCES = [
-    "Welcome to our text to speech service.",
-    "The quick brown fox jumps over the lazy dog.",
-    "Today's weather forecast calls for sunny skies and warm temperatures.",
-    "Please hold while we transfer your call to the next available agent.",
-    "Your order has been confirmed and will be delivered within three business days.",
-    "Attention passengers, flight seven two nine is now boarding at gate twelve.",
-    "Thank you for choosing our restaurant. Your table will be ready in fifteen minutes.",
-    "The meeting has been rescheduled to tomorrow at ten in the morning.",
-    "For technical support, please press one. For billing inquiries, press two.",
-    "Congratulations! You have successfully completed the registration process.",
+    "am i speaking with pallavi",
+    "am i speaking with a. abdul rahaman",
+    "am i speaking with a. ajay",
+    "am i speaking with a. geetha",
+    "am i speaking with a. srinivas",
+    "am i speaking with a balaji",
+    "am i speaking with a dinesh kumar",
+    "am i speaking with a gopal",
+    "am i speaking with a hari prasad",
+    "am i speaking with a ramesh",
 ]
+
+# Default voice and language matching the TTSPrompt files
+DEFAULT_VOICE = "dipti"
+DEFAULT_LANGUAGE = "english"
 
 # Cost constant (example: $0.01 per API call)
 COST_PER_API_CALL = 0.01
@@ -77,8 +82,8 @@ async def run_sequential_benchmark(
                 f"{base_url}/tts",
                 json={
                     "text": text,
-                    "voice": "default",
-                    "language": "en",
+                    "voice": DEFAULT_VOICE,
+                    "language": DEFAULT_LANGUAGE,
                     "format": "wav",
                 },
                 timeout=60.0,
@@ -198,8 +203,8 @@ async def run_concurrency_test(
                 f"{base_url}/tts",
                 json={
                     "text": test_text,
-                    "voice": "default",
-                    "language": "en",
+                    "voice": DEFAULT_VOICE,
+                    "language": DEFAULT_LANGUAGE,
                     "format": "wav",
                 },
                 timeout=60.0,

@@ -9,6 +9,25 @@ is controlled here.
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
+# Mapping of full language names to ISO codes.
+# Used for normalizing language inputs so that both "english" and "en"
+# produce the same cache key.
+LANGUAGE_ALIASES: dict[str, str] = {
+    "english": "en",
+    "hindi": "hi",
+    "tamil": "ta",
+    "telugu": "te",
+    "kannada": "kn",
+    "malayalam": "ml",
+    "bengali": "bn",
+    "gujarati": "gu",
+    "marathi": "mr",
+    "punjabi": "pa",
+    "urdu": "ur",
+    "odia": "or",
+    "assamese": "as",
+}
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables / .env file."""
@@ -39,6 +58,12 @@ class Settings(BaseSettings):
     eviction_threshold: float = Field(
         default=0.8,
         description="Trigger eviction when disk usage exceeds this fraction of max_cache_size_gb",
+    )
+
+    # --- Pre-generated audio fallback ---
+    pre_generated_dir: str = Field(
+        default="./TTSPrompt",
+        description="Directory containing pre-generated TTS audio files for local fallback",
     )
 
     # --- Demo mode (optional) ---

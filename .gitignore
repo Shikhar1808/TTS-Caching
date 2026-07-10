@@ -16,6 +16,9 @@ wheels/
 tts_cache/
 .pytest_cache/
 
+# Pre-generated TTS audio (large WAV files)
+TTSPrompt/
+
 # Benchmark results
 benchmark_results.json
 

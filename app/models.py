@@ -5,7 +5,7 @@ Defines request/response schemas for all API endpoints and the Redis
 metadata structure used for cache entries.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TTSRequest(BaseModel):
@@ -14,12 +14,28 @@ class TTSRequest(BaseModel):
     The `text` field should contain the FINAL resolved text — any dynamic
     content (names, numbers, etc.) must already be substituted before
     reaching this endpoint.
+
+    The `language` field accepts both ISO codes ("en") and full names
+    ("english") — full names are normalized to ISO codes automatically.
     """
 
     text: str = Field(..., min_length=1, description="Text to synthesize into speech")
     voice: str = Field(..., min_length=1, description="Voice identifier")
-    language: str = Field(..., min_length=1, description="Language code (e.g. 'en', 'es')")
+    language: str = Field(..., min_length=1, description="Language code (e.g. 'en') or full name (e.g. 'english')")
     format: str = Field(default="wav", description="Audio output format")
+
+    @field_validator("language")
+    @classmethod
+    def normalize_language(cls, v: str) -> str:
+        """Normalize full language names to ISO codes.
+
+        Accepts both 'english' and 'en' — full names are lowered and mapped
+        via LANGUAGE_ALIASES. Unknown values pass through unchanged.
+        """
+        from .config import LANGUAGE_ALIASES
+
+        lowered = v.strip().lower()
+        return LANGUAGE_ALIASES.get(lowered, lowered)
 
 
 class CacheMetadata(BaseModel):
