@@ -105,7 +105,7 @@ Client POST /tts {"text":"New sentence","voice":"default","language":"en"}
    → Still not found
     │
     ▼
-6. Call external TTS API: POST {base_url}/synthesize
+6. Call direct Azure TTS SDK (in background thread via asyncio.to_thread)
    with retry + exponential backoff (tenacity)
    → Returns audio bytes
     │
@@ -362,17 +362,15 @@ docker exec -it tts-redis redis-cli GET "tts:meta:a7c3e1f9b2d4068513579bdf2468ac
 # Check if the "path" field points to an existing file
 ```
 
-### 2. External API timeout
+### 2. Azure Speech API timeout or cancellation
 
 **Symptom:** `POST /tts` returns HTTP 502 after a delay.
 
-**Cause:** The external TTS API is slow or unreachable.
+**Cause:** The Azure Speech service is slow, has connection issues, or authorization is invalid (e.g. wrong key/region).
 
-**What happens:** tenacity retries 3 times with exponential backoff (1s, 2s, 4s).
-After all retries fail, a `TTSGenerationError` is raised → HTTP 502 response.
+**What happens:** For transient network/connection issues, tenacity retries 3 times (by default) with exponential backoff. After all retries fail, or in case of permanent errors (e.g. invalid subscription key), a `TTSGenerationError` is raised → HTTP 502 response.
 
-**Debug:** Check logs for `TTS generation FAILED after Xms` messages. Verify
-`TTS_API_BASE_URL` is correct and the API is reachable.
+**Debug:** Check logs for `TTS generation FAILED after Xms` messages. Verify that `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` are correctly configured in `.env`.
 
 ### 3. Lock never released (stuck lock)
 
@@ -426,12 +424,12 @@ docker exec -it tts-redis redis-cli ping
 python -c "
 import xxhash
 text = 'am i speaking with a. ajay'
-voice = 'dipti'
-language = 'english'
+voice = 'en-IN-KavyaNeural'
+language = 'en-IN'
 fmt = 'wav'
 
 # Normalize language
-aliases = {'english': 'en', 'hindi': 'hi', 'tamil': 'ta', 'telugu': 'te'}
+aliases = {'english': 'en', 'hindi': 'hi', 'tamil': 'ta', 'telugu': 'te', 'en-in': 'en-in'}
 normalized_lang = aliases.get(language.strip().lower(), language.strip().lower())
 
 input_str = f'{normalized_lang}_{voice}_{text}'

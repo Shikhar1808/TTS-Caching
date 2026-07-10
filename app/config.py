@@ -90,6 +90,16 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for transient TTS API failures",
     )
 
+    # --- Azure TTS Settings ---
+    azure_speech_key: str | None = Field(
+        default=None,
+        description="Azure Speech subscription key",
+    )
+    azure_speech_region: str = Field(
+        default="centralindia",
+        description="Azure Speech service region",
+    )
+
     # --- Distributed lock ---
     lock_timeout_seconds: int = Field(
         default=30,

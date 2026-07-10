@@ -1,6 +1,6 @@
 # TTS Caching Server
 
-A production-grade FastAPI server that accepts text input, generates speech audio via an external TTS API, and caches the result on local disk using content-addressable storage (xxh3_128 hashing). Identical requests never hit the external API twice. The server includes a **local fallback layer** that serves pre-generated files (e.g., from `TTSPrompt/`) directly at zero API cost. Cache lookups are backed by Redis metadata with distributed locking for safe concurrent access.
+A production-grade FastAPI server that accepts text input, generates speech audio via the integrated Azure Text-to-Speech (TTS) SDK directly, and caches the result on local disk using content-addressable storage (xxh3_128 hashing). Identical requests never hit the Azure API twice. The server includes a **local fallback layer** that serves pre-generated files (e.g., from `TTSPrompt/`) directly at zero API cost. Cache lookups are backed by Redis metadata with distributed locking for safe concurrent access.
 
 ## Prerequisites
 
@@ -99,7 +99,9 @@ docker compose down
 | `EVICTION_ENABLED` | `false` | Toggle automatic LRU eviction |
 | `EVICTION_THRESHOLD` | `0.8` | Eviction trigger (fraction of max size) |
 | `DEMO_MODE_ENABLED` | `true` | Toggle `/demo/synthesize` endpoint |
-| `TTS_API_BASE_URL` | `http://localhost:8000/demo` | External TTS API base URL |
+| `AZURE_SPEECH_KEY` | *Required* | Subscription key for the Azure Speech SDK |
+| `AZURE_SPEECH_REGION` | `centralindia` | Azure service region for the Speech SDK |
+| `TTS_API_BASE_URL` | `http://localhost:8000/demo` | External TTS API base URL (for demo endpoint integration fallback) |
 | `TTS_API_KEY` | `demo-key` | API key for external TTS |
 | `TTS_API_TIMEOUT` | `30.0` | API call timeout (seconds) |
 | `TTS_API_MAX_RETRIES` | `3` | Max retry attempts |
@@ -113,7 +115,7 @@ docker compose down
 ```bash
 curl -X POST http://localhost:8000/tts \
   -H "Content-Type: application/json" \
-  -d '{"text": "am i speaking with a. ajay", "voice": "dipti", "language": "english"}' \
+  -d '{"text": "am i speaking with a. ajay", "voice": "en-IN-KavyaNeural", "language": "en-IN"}' \
   --output hello.wav
 ```
 
@@ -122,8 +124,8 @@ curl -X POST http://localhost:8000/tts \
 ```json
 {
   "text": "am i speaking with a. ajay",
-  "voice": "dipti",
-  "language": "english",
+  "voice": "en-IN-KavyaNeural",
+  "language": "en-IN",
   "format": "wav"
 }
 ```
@@ -238,20 +240,20 @@ uv run python -m scripts.hash_prompts --dir ./TTSPrompt --dry-run
 uv run python -m scripts.hash_prompts --dir ./TTSPrompt
 ```
 
-## Switching to a Real TTS API
+## Configuring Azure TTS API
 
-When you have access to the actual TTS service:
+The server is integrated with the Azure Text-to-Speech (TTS) SDK directly. To configure your credentials:
 
-1. Update `.env`:
+1. Update `.env` with your Azure credentials:
+   ```env
+   AZURE_SPEECH_KEY=your-actual-subscription-key
+   AZURE_SPEECH_REGION=centralindia
    ```
-   DEMO_MODE_ENABLED=false
-   TTS_API_BASE_URL=https://your-tts-api.com/v1
-   TTS_API_KEY=your-actual-api-key
-   ```
 
-2. If the API has a different request format, update the payload in `tts_client.py` → `_call_api()`.
-
-3. Restart the server.
+2. Request audio by specifying an Azure-supported language and voice in the POST body:
+   - **English (India)**: `language: "en-IN"`, `voice: "en-IN-KavyaNeural"`
+   - **Hindi (India)**: `language: "hi-IN"`, `voice: "hi-IN-KavyaNeural"`
+   - **Marathi (India)**: `language: "mr-IN"`, `voice: "mr-IN-AarohiNeural"`
 
 ## Project Structure
 
@@ -261,16 +263,18 @@ TTS Server/
 │   ├── __init__.py
 │   ├── main.py       # FastAPI app + endpoints
 │   ├── cache.py      # CacheManager (hashing, Redis, disk I/O, locking)
-│   ├── tts_client.py # Async TTS API client with retry
+│   ├── tts_client.py # Direct Azure Speech SDK client (non-blocking threading + retry)
 │   ├── config.py     # Pydantic Settings
 │   ├── models.py     # Request/response models
 │   ├── pre_generated.py # Pre-generated local fallback index
 │   └── eviction.py   # LRU eviction (optional)
 ├── scripts/          # Standalone client / benchmark tools
-│   └── benchmark.py  # Benchmark client (optional)
+│   ├── AzureFaberTTs.py # Azure TTS standalone generator script
+│   └── benchmark.py  # Benchmark client with concurrent load testing
 ├── TTSPrompt/        # Pre-generated WAV audio files for local fallback
 ├── pyproject.toml    # uv project dependencies
 ├── .env.example      # Environment template
 ├── README.md         # This file
-└── HOW_IT_WORKS.md   # Architecture & debugging guide
+├── HOW_IT_WORKS.md   # Architecture & debugging guide
+└── FUTURE_IMPROVEMENTS.md # Architectural advice for dynamic prompts
 ```
