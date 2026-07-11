@@ -24,14 +24,11 @@ locking, and LRU eviction.
 ### Cache HIT Path (fast — no external API call)
 
 ```
-Client POST /tts {"text":"Hello world","voice":"default","language":"english"}
+Client POST /tts {"text":"Hello world","voice":"default","language":"en-IN"}
     │
     ▼
-1. Normalize language: "english" → "en"
-    │
-    ▼
-2. Compute cache_key = xxh3_128("en_default_Hello world" + "wav").hexdigest()
-   → e.g. "a3f7b2c1e9d04856a1b2c3d4e5f60718"
+1. Compute cache_key = xxh3_128("english_default_Hello world" + "wav").hexdigest()
+   → e.g. "a3f7b2c1e9d04856a1b2c3d4e5f60718" (hashed under full name "english")
     │
     ▼
 3. Redis GET tts:meta:a3f7b2c1e9d04856a1b2c3d4e5f60718
@@ -54,14 +51,11 @@ Client POST /tts {"text":"Hello world","voice":"default","language":"english"}
 ### Pre-Generated HIT Path (local fallback — no external API call)
 
 ```
-Client POST /tts {"text":"am i speaking with a. ajay","voice":"dipti","language":"english"}
+Client POST /tts {"text":"am i speaking with a. ajay","voice":"dipti","language":"en-IN"}
     │
     ▼
-1. Normalize language: "english" → "en"
-    │
-    ▼
-2. Compute cache_key = xxh3_128("en_dipti_am i speaking with a. ajay" + "wav").hexdigest()
-   → e.g. "3fe6e89c23922812f98563d4b33ef991"
+1. Compute cache_key = xxh3_128("english_dipti_am i speaking with a. ajay" + "wav").hexdigest()
+   → e.g. "3fe6e89c23922812f98563d4b33ef991" (hashed under full name "english")
     │
     ▼
 3. Redis GET tts:meta:3fe6e89c...
@@ -82,10 +76,10 @@ Client POST /tts {"text":"am i speaking with a. ajay","voice":"dipti","language"
 ### Cache MISS Path (slow — calls external TTS API)
 
 ```
-Client POST /tts {"text":"New sentence","voice":"default","language":"en"}
+Client POST /tts {"text":"New sentence","voice":"default","language":"en-IN"}
     │
     ▼
-1. Compute cache_key = xxh3_128("en_default_New sentence" + "wav").hexdigest()
+1. Compute cache_key = xxh3_128("english_default_New sentence" + "wav").hexdigest()
    → e.g. "b1e2f3a4c5d60718fedcba9876543210"
     │
     ▼
@@ -139,7 +133,9 @@ The cache key is a **pure hash** — no human-readable prefix, no slug.
 ### Formula
 
 ```python
-input_string = f"{language}_{voice}_{text}"
+# The language parameter must be exactly the standard BCP-47 tag:
+full_lang    = get_full_language_name(language) 
+input_string = f"{full_lang}_{voice}_{text}"
 cache_key    = xxh3_128((input_string + format).encode("utf-8")).hexdigest()
 filename     = f"{cache_key}.{format}"
 ```
@@ -150,17 +146,22 @@ filename     = f"{cache_key}.{format}"
 ```
 text     = "Hello, welcome to our service."
 voice    = "default"
-language = "en"
+language = "en-IN"
 format   = "wav"
 ```
 
 **Computation:**
 ```python
 import xxhash
+from app.config import get_full_language_name
 
-input_string = "en_default_Hello, welcome to our service."
+# 1. Resolve BCP-47 tag to full language name
+full_lang = get_full_language_name("en-IN") # Returns "english"
+
+# 2. Build input string using full language name
+input_string = "english_default_Hello, welcome to our service."
 hash_input   = input_string + "wav"
-# hash_input = "en_default_Hello, welcome to our service.wav"
+# hash_input = "english_default_Hello, welcome to our service.wav"
 
 cache_key = xxhash.xxh3_128(hash_input.encode("utf-8")).hexdigest()
 # cache_key = "a7c3e1f9b2d4068513579bdf2468ace0"  (example)
@@ -178,6 +179,13 @@ path     = "tts_cache/a7/a7c3e1f9b2d4068513579bdf2468ace0.wav"
 | `voice` | ✓ | Different voice = different audio |
 | `text` | ✓ | Different text = different content |
 | `format` | ✓ | Different format = different encoding |
+
+> [!NOTE]
+> **Underscore Separators vs. Spaces:**
+> - The fields are concatenated with single underscores (`_`) separating the language, voice, and text: `f"{full_lang}_{voice}_{text}{format}"`.
+> - This puts an underscore after the voice name directly preceding the text (e.g. `dipti_am`).
+> - The text component itself **retains standard spaces** (no underscores).
+> - The format extension is appended directly at the end without any dots or separators (e.g. `wav`).
 
 ### What does NOT feed into the hash
 

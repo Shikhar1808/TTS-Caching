@@ -389,7 +389,7 @@ async def demo_synthesize(request: Request):
     body = await request.json()
     text = body.get("text", "")
     voice = body.get("voice", "default")
-    language = body.get("language", "en")
+    language = body.get("language", "en-IN")
     fmt = body.get("format", "wav")
 
     # Artificial latency to simulate real API (300ms – 1000ms)

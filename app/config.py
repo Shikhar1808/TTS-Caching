@@ -9,24 +9,42 @@ is controlled here.
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
-# Mapping of full language names to ISO codes.
-# Used for normalizing language inputs so that both "english" and "en"
-# produce the same cache key.
-LANGUAGE_ALIASES: dict[str, str] = {
-    "english": "en",
-    "hindi": "hi",
-    "tamil": "ta",
-    "telugu": "te",
-    "kannada": "kn",
-    "malayalam": "ml",
-    "bengali": "bn",
-    "gujarati": "gu",
-    "marathi": "mr",
-    "punjabi": "pa",
-    "urdu": "ur",
-    "odia": "or",
-    "assamese": "as",
+# Single source of truth for all language metadata
+LANGUAGES: dict[str, dict[str, str]] = {
+    "en-in": {"standard": "en-IN", "full_name": "english"},
+    "hi-in": {"standard": "hi-IN", "full_name": "hindi"},
+    "ta-in": {"standard": "ta-IN", "full_name": "tamil"},
+    "te-in": {"standard": "te-IN", "full_name": "telugu"},
+    "kn-in": {"standard": "kn-IN", "full_name": "kannada"},
+    "ml-in": {"standard": "ml-IN", "full_name": "malayalam"},
+    "bn-in": {"standard": "bn-IN", "full_name": "bengali"},
+    "gu-in": {"standard": "gu-IN", "full_name": "gujarati"},
+    "mr-in": {"standard": "mr-IN", "full_name": "marathi"},
+    "pa-in": {"standard": "pa-IN", "full_name": "punjabi"},
+    "ur-in": {"standard": "ur-IN", "full_name": "urdu"},
+    "or-in": {"standard": "or-IN", "full_name": "odia"},
+    "as-in": {"standard": "as-IN", "full_name": "assamese"},
 }
+
+# Dynamically build standard locales set for exact runtime validation checking
+SUPPORTED_LOCALES: set[str] = {
+    v["standard"] for v in LANGUAGES.values()
+}
+
+# Dynamically build aliases mapping for offline/legacy file parsing
+LANGUAGE_ALIASES: dict[str, str] = {}
+for k, v in LANGUAGES.items():
+    LANGUAGE_ALIASES[v["full_name"]] = v["standard"]
+    # Map 2-letter ISO prefix (e.g. "en") to the locale tag
+    LANGUAGE_ALIASES[k.split("-")[0]] = v["standard"]
+
+
+def get_full_language_name(lang: str) -> str:
+    """Resolve a standard BCP-47 tag (e.g. 'en-IN') to its full language name (e.g. 'english')."""
+    clean_lang = lang.strip().lower()
+    if clean_lang in LANGUAGES:
+        return LANGUAGES[clean_lang]["full_name"]
+    return clean_lang
 
 
 class Settings(BaseSettings):

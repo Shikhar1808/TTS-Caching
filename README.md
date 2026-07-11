@@ -130,7 +130,24 @@ curl -X POST http://localhost:8000/tts \
 }
 ```
 
-*Note: The `language` parameter automatically normalizes full names (like `"english"`) to ISO codes (like `"en"`) internally.*
+#### Test Requests (Normalization and Hashing Validation)
+The server strictly accepts language codes in their exact standard BCP-47 locale tag format (like `"en-IN"` or `"hi-IN"`). Case variations (like `"en-in"`, `"EN-IN"`) and aliases (like `"english"`, `"en"`) are strictly rejected with `422 Unprocessable Entity` validation errors.
+
+1. **Standard BCP-47 locale tag** (Accepted):
+   ```json
+   {
+     "text": "test prompt",
+     "voice": "en-IN-KavyaNeural",
+     "language": "en-IN"
+   }
+   ```
+2. **Casing Variations / Aliases / Codes** (Rejected with 422 Validation Error):
+   - `"en-in"` (lowercase region code rejected)
+   - `"EN-IN"` (uppercase language code rejected)
+   - `"english"` (full language name alias rejected)
+   - `"en"` (2-letter ISO code rejected)
+
+*Note: The accepted standard-cased tag (e.g. `"en-IN"`) computes a cache key hash using the full language name (e.g. `"english"`). The input string for hashing is formatted as `f"{full_lang}_{voice}_{text}{format}"` (e.g. `"english_en-IN-KavyaNeural_test promptwav"`). Underlines/underscores (`_`) are used to separate the main fields (`language`, `voice`, and `text`), but the text itself retains normal spaces with no underscores.*
 
 **Response:** Binary audio file with headers:
 - `Content-Type: audio/wav`

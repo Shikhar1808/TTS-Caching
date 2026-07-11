@@ -21,21 +21,25 @@ class TTSRequest(BaseModel):
 
     text: str = Field(..., min_length=1, description="Text to synthesize into speech")
     voice: str = Field(..., min_length=1, description="Voice identifier")
-    language: str = Field(..., min_length=1, description="Language code (e.g. 'en') or full name (e.g. 'english')")
+    language: str = Field(..., min_length=1, description="BCP-47 language tag (e.g. 'en-IN', 'hi-IN')")
     format: str = Field(default="wav", description="Audio output format")
 
     @field_validator("language")
     @classmethod
     def normalize_language(cls, v: str) -> str:
-        """Normalize full language names to ISO codes.
+        """Validate that the language is exactly a supported standard BCP-47 tag.
 
-        Accepts both 'english' and 'en' — full names are lowered and mapped
-        via LANGUAGE_ALIASES. Unknown values pass through unchanged.
+        Accepts only standard locale tags in their exact case (e.g. 'en-IN', 'hi-IN').
+        Other casing variations (e.g. 'en-in') are rejected.
         """
-        from .config import LANGUAGE_ALIASES
+        from .config import SUPPORTED_LOCALES
 
-        lowered = v.strip().lower()
-        return LANGUAGE_ALIASES.get(lowered, lowered)
+        if v not in SUPPORTED_LOCALES:
+            raise ValueError(
+                f"Unsupported language format: '{v}'. The request must use standard BCP-47 tags: "
+                f"{', '.join(sorted(SUPPORTED_LOCALES))}."
+            )
+        return v
 
 
 class CacheMetadata(BaseModel):

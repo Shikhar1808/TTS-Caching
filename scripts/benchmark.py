@@ -40,6 +40,9 @@ DEFAULT_SENTENCES = [
 COST_PER_API_CALL = 0.01
 
 
+# Casing variations are strictly rejected. Requests must use standard cased tags exactly.
+
+
 async def run_sequential_benchmark(
     client: httpx.AsyncClient,
     base_url: str,

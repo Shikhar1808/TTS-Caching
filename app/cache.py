@@ -20,7 +20,7 @@ from typing import Optional
 import redis.asyncio as aioredis
 import xxhash
 
-from .config import get_settings
+from .config import get_settings, get_full_language_name
 from .models import CacheMetadata, CacheStatsResponse, TTSRequest
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class CacheManager:
         The cache key is a pure hex hash — no human-readable prefix or slug.
 
         Formula:
-            input_string = f"{language}_{voice}_{text}"
+            input_string = f"{full_language_name}_{voice}_{text}"
             cache_key    = xxh3_128(input_string + format).hexdigest()
 
         Args:
@@ -85,7 +85,8 @@ class CacheManager:
         Returns:
             A 32-character hex string (128-bit hash).
         """
-        input_string = f"{request.language}_{request.voice}_{request.text}"
+        full_lang = get_full_language_name(request.language)
+        input_string = f"{full_lang}_{request.voice}_{request.text}"
         hash_input = input_string + request.format
         return xxhash.xxh3_128(hash_input.encode("utf-8")).hexdigest()
 
