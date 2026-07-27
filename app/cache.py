@@ -90,33 +90,9 @@ class CacheManager:
         hash_input = input_string + request.format
         return xxhash.xxh3_128(hash_input.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def get_shard(cache_key: str) -> str:
-        """Extract the shard directory name from a cache key.
-
-        Uses the first 2 hex characters of the hash to distribute files
-        across ~256 subdirectories, preventing too many files in one dir.
-
-        Args:
-            cache_key: The hex hash string.
-
-        Returns:
-            A 2-character hex string (e.g. "a3", "ff").
-        """
-        return cache_key[:2]
-
     def get_file_path(self, cache_key: str, fmt: str) -> Path:
-        """Build the full file path for a cached audio file.
-
-        Args:
-            cache_key: The hex hash string.
-            fmt: Audio format extension (e.g. "wav").
-
-        Returns:
-            Path like {cache_dir}/{shard}/{cache_key}.{fmt}
-        """
-        shard = self.get_shard(cache_key)
-        return self._cache_dir / shard / f"{cache_key}.{fmt}"
+        """Build the full file path for a cached audio file."""
+        return self._cache_dir / cache_key[:2] / f"{cache_key}.{fmt}"
 
     # ------------------------------------------------------------------ #
     # Cache get / put
@@ -181,7 +157,7 @@ class CacheManager:
             The CacheMetadata stored in Redis.
         """
         fmt = request.format
-        shard = self.get_shard(cache_key)
+        shard = cache_key[:2]
         shard_dir = self._cache_dir / shard
         final_path = shard_dir / f"{cache_key}.{fmt}"
         temp_path = shard_dir / f"{cache_key}.{fmt}.tmp"

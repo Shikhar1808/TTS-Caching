@@ -18,6 +18,9 @@ tts_cache/
 
 # Pre-generated TTS audio (large WAV files)
 TTSPrompt/
+TTSPrompt_test/
+TTSPrompt_hashed/
+java/
 
 # Benchmark results
 benchmark_results.json

@@ -24,7 +24,7 @@ from typing import AsyncGenerator
 import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .cache import CacheManager
 from .config import get_settings
@@ -410,8 +410,6 @@ async def demo_synthesize(request: Request):
                     delay,
                     text[:50],
                 )
-                from fastapi.responses import Response
-
                 audio_bytes = pre_gen_path.read_bytes()
                 return Response(
                     content=audio_bytes,
@@ -445,8 +443,6 @@ async def demo_synthesize(request: Request):
         delay,
         text[:50],
     )
-
-    from fastapi.responses import Response
 
     return Response(
         content=wav_bytes,
