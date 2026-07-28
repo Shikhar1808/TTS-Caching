@@ -4,7 +4,6 @@ and export them to an output directory with xxHash128 (XXH3_128) hashed filename
 
 Usage:
   python scripts/hash_audio_dir.py --input-dir ./TTSPrompt_test --output-dir ./TTSPrompt_hashed
-  python scripts/hash_audio_dir.py --input-dir ./TTSPrompt_test --output-dir ./tts_cache --sharded
 """
 
 import argparse
@@ -41,13 +40,11 @@ LANGUAGE_MAP: dict[str, str] = {
 
 
 def is_already_hashed(filename: str) -> bool:
-    """Check if filename base is a 32-character hex hash."""
     name, _, ext = filename.rpartition(".")
     return len(name) == 32 and all(c in "0123456789abcdefABCDEF" for c in name) if ext else False
 
 
 def parse_filename(filename: str) -> Optional[tuple[str, str, str, str]]:
-    """Parse prompt filename into (language, voice, text, format)."""
     name, _, ext = filename.rpartition(".")
     if not name or not ext or ext.lower() not in ("wav", "mp3", "ogg", "flac"):
         return None
@@ -67,10 +64,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Standalone batch audio file xxHash128 exporter.")
     parser.add_argument("--input-dir", "-i", default="./TTSPrompt_test", help="Source directory (default: ./TTSPrompt_test)")
     parser.add_argument("--output-dir", "-o", default="./TTSPrompt_hashed", help="Target directory (default: ./TTSPrompt_hashed)")
-    parser.add_argument("--sharded", "-s", action="store_true", help="Use 2-char subdirectories (e.g. output_dir/6e/...)")
     parser.add_argument("--move", action="store_true", help="Move files instead of copying")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing files in target directory")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate without writing files")
     args = parser.parse_args()
 
     input_path = Path(args.input_dir).resolve()
@@ -80,10 +74,9 @@ def main() -> None:
         logger.error("Input directory not found: %s", input_path)
         return
 
-    logger.info("Scanning '%s' -> '%s' [Mode: %s, Sharded: %s]", input_path, output_path, "MOVE" if args.move else "COPY", args.sharded)
+    logger.info("Scanning '%s' -> '%s' [Mode: %s]", input_path, output_path, "MOVE" if args.move else "COPY")
 
-    if not args.dry_run:
-        output_path.mkdir(parents=True, exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     total, processed, already_hashed, skipped, errors = 0, 0, 0, 0, 0
 
@@ -95,7 +88,6 @@ def main() -> None:
         filename = entry.name
 
         if is_already_hashed(filename):
-            already_hashed += 1
             cache_key, _, ext = filename.rpartition(".")
             hashed_filename = filename
         else:
@@ -113,26 +105,21 @@ def main() -> None:
                 logger.warning("Hash error for %s: %s", filename, e)
                 continue
 
-        target_dir = output_path / cache_key[:2] if (args.sharded and len(cache_key) >= 2) else output_path
-        target_file = target_dir / hashed_filename
+        target_file = output_path / hashed_filename
 
-        if target_file.exists() and not args.overwrite:
+        if target_file.exists():
             already_hashed += 1
             continue
 
-        if not args.dry_run:
-            try:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                if args.move:
-                    shutil.move(entry.path, target_file)
-                else:
-                    shutil.copy2(entry.path, target_file)
-                processed += 1
-            except Exception as e:
-                errors += 1
-                logger.error("Failed to process %s: %s", filename, e)
-        else:
+        try:
+            if args.move:
+                shutil.move(entry.path, target_file)
+            else:
+                shutil.copy2(entry.path, target_file)
             processed += 1
+        except Exception as e:
+            errors += 1
+            logger.error("Failed to process %s: %s", filename, e)
 
     logger.info("Complete: Total=%d | Exported=%d | Existing/AlreadyHashed=%d | Skipped=%d | Errors=%d", total, processed, already_hashed, skipped, errors)
 
